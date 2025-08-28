@@ -28,7 +28,7 @@
   <!-- Babel so we can write JSX inline for a single‑file GitHub Pages demo -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-  <script type="text/babel">
+  <script type="text/babel" data-presets="env,react">
     const { useMemo, useState } = React;
     const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = Recharts;
 
