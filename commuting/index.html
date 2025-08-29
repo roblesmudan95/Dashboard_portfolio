@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Commuting Dashboard Demo</title>
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { brand: '#0C0C48' } } } };
+  </script>
+  <!-- Leaflet (map) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <!-- React -->
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Day.js + Babel -->
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    .card { @apply rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useEffect, useMemo, useRef, useState } = React;
+    const numberFmt = (x) => (x ?? 0).toLocaleString();
+
+    // ---------------- Header & Tabs ----------------
+    function Header({ asOf }) {
+      return (
+        <div className="w-full bg-brand text-white">
+          <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <img src="https://www.auckland.ac.nz/content/auckland/en/news/2025/04/15/refreshed-university-logo-unifies-brand/_jcr_content/leftpar/imagecomponent/image.img.480.low.jpg/1744667894355.jpg" alt="UoA logo" className="h-10 w-auto"/>
+              <div className="hidden sm:block font-medium">Staff Commuting Dashboard • Demo</div>
+            </div>
+            <div className="text-sm opacity-80">{asOf}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Tabs({ tab, setTab }){
+      const items = [
+        { key:'location', label: 'A. Location data' },
+        { key:'survey', label: 'B. Survey results' }
+      ];
+      return (
+        <div className="mx-auto max-w-7xl px-4">
+          <div className="flex gap-2 overflow-auto py-3">
+            {items.map(it => (
+              <button key={it.key} onClick={()=>setTab(it.key)}
+                className={`whitespace-nowrap rounded-full px-4 py-2 text-sm ring-1 ring-slate-300 ${tab===it.key?'bg-brand text-white ring-brand':'bg-white text-slate-700'}`}>{it.label}</button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ---------------- Charts wrapper ----------------
+    function ChartBox({ type='bar', data, options, className }){
+      const canvasRef = useRef(null);
+      useEffect(()=>{
+        const ctx = canvasRef.current.getContext('2d');
+        const chart = new Chart(ctx, { type, data, options });
+        return ()=> chart.destroy();
+      }, [JSON.stringify(data), JSON.stringify(options), type]);
+      return <div className={className}><canvas ref={canvasRef}/></div>;
+    }
+
+    // ---------------- Dummy datasets ----------------
+    // Postal code points (approximate Auckland coords) with FTE and permit counts
+    const postalPoints = [
+      { code:'1010', name:'CBD', lat:-36.8485, lng:174.7633, fte:511.33, permits:0 },
+      { code:'1071', name:'Meadowbank', lat:-36.866, lng:174.830, fte:253.39, permits:92 },
+      { code:'1025', name:'Mount Eden', lat:-36.875, lng:174.756, fte:218.22, permits:40 },
+      { code:'1024', name:'Mount Albert', lat:-36.884, lng:174.719, fte:211.32, permits:34 },
+      { code:'0600', name:'Henderson', lat:-36.878, lng:174.626, fte:203.91, permits:45 },
+      { code:'1041', name:'Mount Roskill', lat:-36.913, lng:174.735, fte:200.05, permits:32 },
+      { code:'Unknown', name:'Unknown', lat:-36.85, lng:174.74, fte:393.63, permits:5 }
+    ];
+
+    const distanceBands = [
+      { label:'0 → 2 km', radius:2000, year:2024, fte:600.48, permits:0 },
+      { label:'2.5 → 5 km', radius:5000, year:2024, fte:737.30, permits:74 },
+      { label:'5 → 10 km', radius:10000, year:2024, fte:1835.54, permits:382 },
+      { label:'10 → 20 km', radius:20000, year:2024, fte:1768.00, permits:400 }
+    ];
+
+    // Survey — distribution by distance: stacked by mode
+    const distLabels = ['0 → 2 km','2 → 5 km','5 → 10 km','10 → 20 km','50 → 100 km','100 → 200 km','> 200 km'];
+    const modes = [
+      { label:'Walk', data:[60,25,10,8,2,1,0] },
+      { label:'Public Transport', data:[30,60,140,230,40,15,5] },
+      { label:'Other', data:[10,20,30,70,10,3,1] },
+      { label:'Motorcycle', data:[4,12,20,30,4,2,1] },
+      { label:'Micromobility', data:[12,25,45,35,6,2,1] },
+      { label:'Car', data:[5,15,90,180,25,8,2] }
+    ];
+
+    const modeTotals = [
+      { mode:'Public Transport', responses:720 },
+      { mode:'Car', responses:520 },
+      { mode:'Micromobility', responses:160 },
+      { mode:'Walk', responses:140 },
+      { mode:'Motorcycle', responses:40 },
+      { mode:'Other', responses:20 }
+    ];
+
+    const fuelTable = [
+      { fuel:'Diesel', oneWay:23.85, weekly:3577, wfo:3.39, pax:23 },
+      { fuel:'Fully electric', oneWay:20.52, weekly:4188, wfo:3.74, pax:31 },
+      { fuel:'Petrol', oneWay:23.87, weekly:34111, wfo:3.54, pax:225 },
+      { fuel:'Petrol hybrid', oneWay:29.92, weekly:11072, wfo:3.52, pax:58 },
+      { fuel:'Petrol plug-in hybrid', oneWay:12.59, weekly:816, wfo:3.09, pax:11 }
+    ];
+
+    // ---------------- Location Tab ----------------
+    function LeafletMap({ points }){
+      const mapRef = useRef(null);
+      useEffect(()=>{
+        if (!mapRef.current) {
+          const map = L.map('mapbox', { zoomControl:true, attributionControl:true }).setView([-36.86, 174.76], 10);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+          mapRef.current = map;
+        }
+        const map = mapRef.current;
+        // clear existing layers
+        if (map._pointLayer) { map.removeLayer(map._pointLayer); }
+        const layer = L.layerGroup();
+        points.forEach(p=>{
+          const r = Math.max(6, Math.sqrt(p.fte));
+          const color = '#1e3a8a';
+          const circle = L.circleMarker([p.lat, p.lng], { radius: r, color, weight:1, fillColor:'#60a5fa', fillOpacity:0.6 });
+          const permitPerFTE = p.permits / (p.fte || 1);
+          circle.bindPopup(`<strong>${p.code}</strong><br/>FTE: ${p.fte.toFixed(2)}<br/>Permits: ${p.permits}<br/>Permit/FTE: ${permitPerFTE.toFixed(4)}`);
+          layer.addLayer(circle);
+        });
+        layer.addTo(map);
+        map._pointLayer = layer;
+      }, [JSON.stringify(points)]);
+      return <div id="mapbox" className="w-full h-[540px] rounded-xl overflow-hidden ring-1 ring-slate-200"></div>;
+    }
+
+    function TabLocation(){
+      const totalFTE = postalPoints.reduce((a,b)=>a+b.fte,0);
+      const totalPermits = postalPoints.reduce((a,b)=>a+b.permits,0);
+      const permitsPerFTE = totalPermits / (totalFTE || 1);
+
+      return (
+        <div className="mx-auto max-w-7xl px-4 pb-16">
+          {/* Filters row */}
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            <label className="text-sm">Select a Year
+              <select className="ml-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"><option>2024</option></select>
+            </label>
+            <label className="text-sm">Select a Variable
+              <select className="ml-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"><option>Fte Pc</option></select>
+            </label>
+            <label className="text-sm">Select a Campus
+              <select className="ml-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"><option>(All)</option></select>
+            </label>
+            <label className="text-sm">Select a
+              <select className="ml-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"><option>(All)</option></select>
+            </label>
+            <div className="ml-auto flex gap-6 text-center">
+              <div className="card"><div className="text-slate-500 text-sm">Total Full Time Employee</div><div className="text-2xl font-semibold mt-1">{numberFmt(totalFTE)}</div></div>
+              <div className="card"><div className="text-slate-500 text-sm">Total Car Permits</div><div className="text-2xl font-semibold mt-1">{numberFmt(totalPermits)}</div></div>
+              <div className="card"><div className="text-slate-500 text-sm">Permit per FTE</div><div className="text-2xl font-semibold mt-1">{permitsPerFTE.toFixed(4)}</div></div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div className="lg:col-span-7">
+              <LeafletMap points={postalPoints} />
+              <div className="text-xs text-slate-500 mt-2">Stats NZ, OpenStreetMap contributors. Powered by Leaflet.</div>
+            </div>
+            <div className="lg:col-span-5 space-y-6">
+              <div className="card">
+                <div className="text-lg font-semibold">No. of FTE by postcode</div>
+                <div className="mt-3 max-h-[220px] overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-slate-500">
+                      <tr><th className="py-2">Postal Code</th><th className="py-2">Yr</th><th className="py-2">Fte Pc</th><th className="py-2">Car Permit Count</th><th className="py-2">Permit per FTE</th></tr>
+                    </thead>
+                    <tbody>
+                      {postalPoints.map((p,i)=> (
+                        <tr key={i} className="border-t">
+                          <td className="py-2">{p.code}</td>
+                          <td className="py-2">2024</td>
+                          <td className="py-2">{p.fte.toFixed(2)}</td>
+                          <td className="py-2">{p.permits}</td>
+                          <td className="py-2">{(p.permits/(p.fte||1)).toFixed(4)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="text-lg font-semibold">No. of FTE by distance range</div>
+                <div className="mt-3 max-h-[220px] overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-slate-500">
+                      <tr><th className="py-2">Radius_Label</th><th className="py-2">Radius</th><th className="py-2">Yr</th><th className="py-2">Fte Pc</th><th className="py-2">Car Permit Count</th><th className="py-2">Permit per FTE</th><th className="py-2">% FTE</th><th className="py-2">% Car Permit</th></tr>
+                    </thead>
+                    <tbody>
+                      {distanceBands.map((d,i)=> {
+                        const totalFTEb = distanceBands.reduce((a,b)=>a+b.fte,0);
+                        const totalPermb = distanceBands.reduce((a,b)=>a+b.permits,0);
+                        return (
+                          <tr key={i} className="border-t">
+                            <td className="py-2">{d.label}</td>
+                            <td className="py-2">{numberFmt(d.radius)}</td>
+                            <td className="py-2">{d.year}</td>
+                            <td className="py-2">{numberFmt(d.fte)}</td>
+                            <td className="py-2">{numberFmt(d.permits)}</td>
+                            <td className="py-2">{(d.permits/(d.fte||1)).toFixed(4)}</td>
+                            <td className="py-2">{Math.round((d.fte/(totalFTEb||1))*100)}%</td>
+                            <td className="py-2">{Math.round((d.permits/(totalPermb||1))*100)}%</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ---------------- Survey Tab ----------------
+    function Kpi({ label, value }){
+      return (
+        <div className="card text-center">
+          <div className="text-slate-500 text-sm">{label}</div>
+          <div className="text-3xl font-semibold mt-1">{value}</div>
+        </div>
+      );
+    }
+
+    function TabSurvey(){
+      return (
+        <div className="mx-auto max-w-7xl px-4 pb-16">
+          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            <Kpi label="Total Responses" value={1615} />
+            <Kpi label="Response Rate" value={'10.54%'} />
+            <Kpi label="WFO" value={3.68} />
+            <Kpi label="WFH" value={1.21} />
+            <Kpi label="Part‑Time" value={119} />
+            <Kpi label="Full‑Time" value={1496} />
+          </div>
+
+          <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="card">
+              <h3 className="text-lg font-semibold">Distribution by distance range</h3>
+              <ChartBox type="bar" className="h-[340px]" data={{
+                labels: distLabels,
+                datasets: modes.map((m,i)=>({ label:m.label, data:m.data, stack:'stack1' }))
+              }} options={{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'right' } }, scales:{ x:{ stacked:true }, y:{ stacked:true } } }} />
+            </div>
+
+            <div className="card">
+              <h3 className="text-lg font-semibold">Transport Mode Analysis</h3>
+              <ChartBox type="bar" className="h-[340px]" data={{
+                labels: modeTotals.map(x=>x.mode),
+                datasets: [{ label:'Responses', data: modeTotals.map(x=>x.responses), borderWidth:1, borderRadius:8 }]
+              }} options={{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } } }} />
+            </div>
+          </div>
+
+          <div className="mt-8 card">
+            <h3 className="text-lg font-semibold">Fuel type detail</h3>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-slate-500"><tr><th>Fuel Type</th><th>Avg One Way Km</th><th>Total Weekly Km</th><th>WFO days</th><th>Passengers</th></tr></thead>
+                <tbody>
+                  {fuelTable.map((r,i)=> (
+                    <tr key={i} className="border-t"><td className="py-2">{r.fuel}</td><td className="py-2">{r.oneWay}</td><td className="py-2">{numberFmt(r.weekly)}</td><td className="py-2">{r.wfo}</td><td className="py-2">{r.pax}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-500 mt-3">* Demo only. These results reflect a sample and may not represent the entire staff population.</div>
+        </div>
+      );
+    }
+
+    // ---------------- App ----------------
+    function App(){
+      const [tab, setTab] = useState('location');
+      return (
+        <div className="min-h-screen">
+          <Header asOf={dayjs().format('DD/MM/YYYY')} />
+          <Tabs tab={tab} setTab={setTab} />
+          {tab==='location' && <TabLocation />}
+          {tab==='survey' && <TabSurvey />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
