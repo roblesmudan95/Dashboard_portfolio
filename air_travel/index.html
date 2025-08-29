@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Air Travel Dashboard Demo</title>
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Optional: define a brand color matching your header (#0C0C48)
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { brand: '#0C0C48' }
+        }
+      }
+    }
+  </script>
+  <style>
+    .skeleton { position: relative; overflow: hidden; }
+    .skeleton::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.3), transparent);
+      animation: shimmer 1.5s infinite; }
+    @keyframes shimmer { 100% { transform: translateX(100%); } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="root"></div>
+
+  <!-- React + ReactDOM -->
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Chart.js (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <!-- Day.js -->
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <!-- Babel -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useMemo, useState, useEffect, useRef } = React;
+
+    // ---------------------- Utils ----------------------
+    const numberFmt = (x) => (x ?? 0).toLocaleString();
+    const pct = (a,b) => b ? ((a-b)/b)*100 : 0;
+
+    function Header({ asOf }) {
+      return (
+        <div className="w-full bg-brand text-white">
+          <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <img src="https://www.auckland.ac.nz/content/auckland/en/news/2025/04/15/refreshed-university-logo-unifies-brand/_jcr_content/leftpar/imagecomponent/image.img.480.low.jpg/1744667894355.jpg" alt="UoA logo" className="h-10 w-auto shrink-0"/>
+              <div className="hidden sm:block font-medium">Air Travel Dashboard • Demo</div>
+            </div>
+            <div className="text-sm opacity-80">As of: {asOf}</div>
+          </div>
+        </div>
+      );
+    }
+
+    function Kpi({ title, value, prev }) {
+      const delta = pct(value, prev);
+      const up = delta <= 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'; // green good when lower
+      return (
+        <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+          <div className="text-slate-500 text-sm">{title}</div>
+          <div className="mt-2 text-3xl font-semibold">{numberFmt(Math.round(value||0))}</div>
+          <div className="mt-2 text-xs text-slate-500">Previous Year: {numberFmt(Math.round(prev||0))}</div>
+          <div className={`mt-3 inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs ${up}`}>
+            {delta>=0?'+':''}{delta.toFixed(1)}%
+          </div>
+        </div>
+      );
+    }
+
+    // Generic Chart.js wrapper
+    function ChartBox({ type='bar', data, options, className }){
+      const canvasRef = useRef(null);
+      useEffect(()=>{
+        const ctx = canvasRef.current.getContext('2d');
+        const chart = new Chart(ctx, { type, data, options });
+        return ()=> chart.destroy();
+      }, [JSON.stringify(data), JSON.stringify(options), type]);
+      return <div className={className}><canvas ref={canvasRef}/></div>;
+    }
+
+    // ---------------------- Dummy Data ----------------------
+    // Monthly distance (km) for 2024 & 2025
+    const monthlyDistance = {
+      2024: [5175574, 6730042, 6065643, 7718967, 9479110, 13894006, 0,0,0,0,0,0],
+      2025: [4281053, 5873146, 6036821, 6746977, 8848256, 13397665, 0,0,0,0,0,0]
+    };
+
+    const bookingClass = {
+      labels: ['Economy', 'Premium Economy', 'Business', 'First', 'Comfort Plus'],
+      values: [86755318, 4601319, 2834055, 52857, 3710]
+    };
+
+    const reasons = {
+      labels: ['CONFERENCE','RESEARCH COLLABORATION','FIELD TRIP','DELEGATION','UNISERVICES PROJECT NUMBER','TEACHING','RECRUITMENT'],
+      values: [42000000, 18000000, 2200000, 1600000, 1500000, 1200000, 800000]
+    };
+
+    const travellerType = {
+      labels: ['UOA/Uniservices','UOA Guest','Non-UOA/Uniservices'],
+      values: [79.11, 16.34, 4.55]
+    };
+
+    const topDestinations = [
+      { code: 'AKL', km: 8421991, co2: 1477414 },
+      { code: 'LHR', km: 7556997, co2: 1377032 },
+      { code: 'LAX', km: 4924765, co2: 844742 },
+      { code: 'SYD', km: 3919844, co2: 655217 },
+      { code: 'MEL', km: 2791142, co2: 462882 }
+    ];
+
+    // Inventory tab dummy rows
+    const inventoryRows = Array.from({length: 24}, (_,i)=>({
+      company: 'Auckland UniServices Limited',
+      upi: 'Qo1BMDM1', dep: ['AKL','AKL','AKL','AKL'][i%4], arr: ['CHC','NPL','PMR','WLG'][i%4],
+      booking: ['Economy','Economy+','Business'][i%3], depDate: '2023-09-0'+((i%9)+1), arrDate: '2023-09-0'+((i%9)+1),
+      equip: ['32A','DH3','AT7'][i%3], type: ['Domestic','Short Haul','Long Haul'][i%3],
+      passengers: 1, km: [745,228,375,480][i%4], co2: Math.round([120,40,70,80][i%4]*10)
+    }));
+
+    // Staff profile tab
+    const staffFTEByYear = {
+      labels: ['Academic','Professional'],
+      data2023: [24000, 4200],
+      data2024: [26000, 3900]
+    };
+
+    const unitAnalysis = [
+      { unit: 'Strategic Engagement', value: 34210 },
+      { unit: 'International Office', value: 21840 },
+      { unit: 'Engineering and Design', value: 17650 },
+      { unit: 'Science', value: 16980 },
+      { unit: 'Bioengineering Institute', value: 16440 },
+      { unit: 'Arts and Education', value: 15880 }
+    ];
+
+    const unitTable = [
+      { unit: 'Finance', v2023: 450, v2024: 181, change: -148.2 },
+      { unit: 'School of Graduate Studies', v2023: 22896, v2024: 9373, change: -144.3 },
+      { unit: 'Human Resources', v2023: 2866, v2024: 1755, change: -63.3 },
+      { unit: 'Campus Life', v2023: 3653, v2024: 2250, change: -62.3 },
+      { unit: 'Alumni Relations and Devpt', v2023: 12294, v2024: 9442, change: -30.2 }
+    ];
+
+    // ---------------------- Tabs ----------------------
+    function Tabs({ tab, setTab }){
+      const items = [
+        { key: 'summary', label: 'A. Emissions Summary' },
+        { key: 'inventory', label: 'B. GHG inventory (Emissions Table)' },
+        { key: 'staff', label: 'C. Staff Profile (Emissions Detail)' },
+      ];
+      return (
+        <div className="mx-auto max-w-7xl px-4">
+          <div className="flex gap-2 overflow-auto py-3">
+            {items.map(it => (
+              <button key={it.key}
+                onClick={()=>setTab(it.key)}
+                className={`whitespace-nowrap rounded-full px-4 py-2 text-sm ring-1 ring-slate-300 ${tab===it.key? 'bg-brand text-white ring-brand':'bg-white text-slate-700'}`}>{it.label}</button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ---------------------- Tab A: Emissions Summary ----------------------
+    function TabSummary(){
+      const [year, setYear] = useState('2025');
+      const asOf = dayjs('2025-06-30').format('DD/MM/YYYY');
+
+      const currMonthly = monthlyDistance[year];
+      const prevMonthly = monthlyDistance[String(parseInt(year)-1)];
+
+      const currTotalKm = currMonthly.reduce((a,b)=>a+b,0);
+      const prevTotalKm = prevMonthly.reduce((a,b)=>a+b,0);
+      const currPassengers = 22332; const prevPassengers = 28736;
+      const currTrips = 2619; const prevTrips = 3296;
+      const currCO2 = 7728092; const prevCO2 = 8185687;
+
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+      return (
+        <div className="mx-auto max-w-7xl px-4 pb-16">
+          {/* Filters */}
+          <div className="mt-4 flex flex-wrap gap-4 items-center">
+            <label className="flex items-center gap-2">
+              <span className="text-sm text-slate-600 w-28">Variable</span>
+              <select className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm">
+                <option>Distance Travelled (km)</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-sm text-slate-600 w-16">Year</span>
+              <select value={year} onChange={(e)=>setYear(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm">
+                <option>2024</option>
+                <option>2025</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-sm text-slate-600 w-40">Comparison range</span>
+              <select className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm">
+                <option>To‑Today</option>
+              </select>
+            </label>
+            <div className="ml-auto text-sm text-slate-500">As of: <span className="font-medium">{asOf}</span> <button className="ml-3 rounded-xl bg-slate-200 px-3 py-1 text-xs">Data Glossary ℹ️</button></div>
+          </div>
+
+          {/* KPIs */}
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <Kpi title="Total Passengers" value={currPassengers} prev={prevPassengers} />
+            <Kpi title="Distance Travelled (km)" value={currTotalKm} prev={prevTotalKm} />
+            <Kpi title="Carbon Emission All Pax (kg CO2‑e)" value={currCO2} prev={prevCO2} />
+            <Kpi title="Total Travel Days" value={22332} prev={28736} />
+          </div>
+
+          {/* Monthly Values chart */}
+          <div className="mt-8">
+            <h3 className="text-xl font-semibold">Monthly Values</h3>
+            <div className="mt-3 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <ChartBox type="bar" className="h-[320px]" data={{
+                labels: months,
+                datasets: [{
+                  label: 'Distance Travelled (km)',
+                  data: currMonthly,
+                  borderWidth: 1,
+                  borderRadius: 8,
+                }]
+              }} options={{
+                responsive:true, maintainAspectRatio:false,
+                scales: { y:{ ticks:{ callback:(v)=>v.toLocaleString() } } },
+                plugins: { legend:{ display:false } }
+              }} />
+            </div>
+          </div>
+
+          {/* Reasons + Booking + Traveller Type */}
+          <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <h3 className="text-lg font-semibold">Main Travel Reasons</h3>
+              <ChartBox type="bar" className="h-[300px]" data={{
+                labels: reasons.labels,
+                datasets: [{ data: reasons.values, borderWidth:1, borderRadius: 8 }]
+              }} options={{ indexAxis: 'y', responsive:true, maintainAspectRatio:false,
+                scales:{ x:{ ticks:{ callback:(v)=>v.toLocaleString() } } }, plugins:{ legend:{ display:false } } }} />
+            </div>
+
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <h3 className="text-lg font-semibold">Booking Class</h3>
+              <ChartBox type="bar" className="h-[300px]" data={{
+                labels: bookingClass.labels,
+                datasets: [{ data: bookingClass.values, borderWidth:1, borderRadius: 8 }]
+              }} options={{ indexAxis: 'y', responsive:true, maintainAspectRatio:false,
+                scales:{ x:{ ticks:{ callback:(v)=>v.toLocaleString() } } }, plugins:{ legend:{ display:false } } }} />
+            </div>
+          </div>
+
+          <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <h3 className="text-lg font-semibold">Traveller Type</h3>
+              <ChartBox type="doughnut" className="h-[280px]" data={{ labels: travellerType.labels,
+                datasets: [{ data: travellerType.values }] }} options={{ plugins:{ legend:{ position:'right' } } }} />
+            </div>
+
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Top destinations</h3>
+                <label className="text-sm">Select Travel Type: <select className="ml-2 rounded-lg border border-slate-300 px-2 py-1 text-sm"><option>(All)</option></select></label>
+              </div>
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-slate-500">
+                    <tr><th className="py-2">Main Destination</th><th className="py-2">Total Km Distance</th><th className="py-2">Total Carbon</th></tr>
+                  </thead>
+                  <tbody>
+                    {topDestinations.map((r,i)=> (
+                      <tr key={i} className="border-t"><td className="py-2">{r.code}</td><td className="py-2">{numberFmt(r.km)}</td><td className="py-2">{numberFmt(r.co2)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ---------------------- Tab B: GHG Inventory ----------------------
+    function TabInventory(){
+      const years = ['2023','2024'];
+      const totals = {
+        '2023': { km: 104094015, co2: 17456354, pax: 32617 },
+        '2024': { km: 110403848, co2: 18613976, pax: 32193 },
+      };
+
+      const [page, setPage] = useState(1);
+      const pageSize = 6; const totalPages = Math.ceil(inventoryRows.length/pageSize);
+      const view = inventoryRows.slice((page-1)*pageSize, page*pageSize);
+
+      return (
+        <div className="mx-auto max-w-7xl px-4 pb-16">
+          <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <h3 className="text-lg font-semibold">Total Air Travel</h3>
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-slate-500"><tr><th>Year</th><th>Distance Travelled (km)</th><th>Carbon Emission All Pax (kg CO2‑e)</th><th>Total Passengers</th></tr></thead>
+                  <tbody>
+                    {years.map(y=> (
+                      <tr key={y} className="border-t"><td className="py-2">{y}</td><td className="py-2">{numberFmt(totals[y].km)}</td><td className="py-2">{numberFmt(totals[y].co2)}</td><td className="py-2">{numberFmt(totals[y].pax)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 lg:col-span-2">
+              <h3 className="text-lg font-semibold">Analysis by Travel Type</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+                {[{label:'Short Haul',tot: 6237989, km:40646024},{label:'Long Haul',tot:35982736, km:211912606},{label:'Domestic',tot:3515085, km:18803632}].map((b,i)=> (
+                  <div key={i} className="rounded-xl ring-1 ring-slate-200 p-4">
+                    <div className="font-medium">{b.label}</div>
+                    <div className="text-sm text-slate-500 mt-1">Carbon Emission All Pax</div>
+                    <div className="text-xl font-semibold">{numberFmt(b.tot)}</div>
+                    <div className="text-sm text-slate-500 mt-2">Distance Travelled (km)</div>
+                    <div className="text-lg">{numberFmt(b.km)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+            <h3 className="text-lg font-semibold">Total Air Travel</h3>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-[900px] text-sm">
+                <thead className="text-left text-slate-500">
+                  <tr>
+                    <th className="py-2">Company Name (Orbit)</th>
+                    <th className="py-2">UPI Masked</th>
+                    <th className="py-2">Departure_IATA</th>
+                    <th className="py-2">Arrival_IATA</th>
+                    <th className="py-2">Booking Class</th>
+                    <th className="py-2">Departure Date</th>
+                    <th className="py-2">Arrival Date</th>
+                    <th className="py-2">Equipment</th>
+                    <th className="py-2">Travel Type</th>
+                    <th className="py-2">Passengers</th>
+                    <th className="py-2">Distance (km)</th>
+                    <th className="py-2">Carbon (kg CO2‑e)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {view.map((r,i)=>(
+                    <tr key={i} className="border-t">
+                      <td className="py-2">{r.company}</td>
+                      <td className="py-2">{r.upi}</td>
+                      <td className="py-2">{r.dep}</td>
+                      <td className="py-2">{r.arr}</td>
+                      <td className="py-2">{r.booking}</td>
+                      <td className="py-2">{r.depDate}</td>
+                      <td className="py-2">{r.arrDate}</td>
+                      <td className="py-2">{r.equip}</td>
+                      <td className="py-2">{r.type}</td>
+                      <td className="py-2">{r.passengers}</td>
+                      <td className="py-2">{numberFmt(r.km)}</td>
+                      <td className="py-2">{numberFmt(r.co2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <button onClick={()=>setPage(p=>Math.max(1,p-1))} className="rounded-lg bg-slate-200 px-3 py-1 text-xs">Prev</button>
+              <div className="rounded-full bg-slate-200/80 px-3 py-1 text-xs">Page {page} of {totalPages}</div>
+              <button onClick={()=>setPage(p=>Math.min(totalPages,p+1))} className="rounded-lg bg-slate-200 px-3 py-1 text-xs">Next</button>
+            </div>
+          </div>
+          <div className="mx-auto max-w-7xl text-right text-xs text-slate-500 mt-4">Indicative demo, not audited for emissions purposes.</div>
+        </div>
+      );
+    }
+
+    // ---------------------- Tab C: Staff Profile ----------------------
+    function TabStaff(){
+      return (
+        <div className="mx-auto max-w-7xl px-4 pb-16">
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            <label className="text-sm">Select a Variable to Display
+              <select className="ml-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm">
+                <option>SUSTAIN_AIR_MILES</option>
+              </select>
+            </label>
+            <label className="text-sm">Select a Year
+              <select className="ml-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"><option>(All)</option></select>
+            </label>
+            <label className="text-sm">Faculty/Service Division
+              <select className="ml-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm"><option>(All)</option></select>
+            </label>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <h3 className="text-xl font-semibold">Air Travel per FTE - By year</h3>
+              <div className="text-sm text-slate-500 mt-1">Breakdown by Staff Type</div>
+              <ChartBox type="bar" className="h-[320px]" data={{ labels: staffFTEByYear.labels,
+                datasets: [
+                  { label:'2023', data: staffFTEByYear.data2023, borderWidth:1, borderRadius:8 },
+                  { label:'2024', data: staffFTEByYear.data2024, borderWidth:1, borderRadius:8 }
+                ]
+              }} options={{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ position:'bottom' } }, scales:{ y:{ ticks:{ callback:(v)=>v.toLocaleString() } } } }} />
+            </div>
+
+            <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+              <h3 className="text-xl font-semibold">Air Travel per FTE - Compared to Median Number</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                <ChartBox type="bar" className="h-[260px]" data={{ labels:['Academic','Professional'], datasets:[{ label:'Value per FTE', data:[3100, 2100], borderWidth:1, borderRadius:8 }] }} options={{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } } }} />
+                <ChartBox type="bar" className="h-[260px]" data={{ labels:['Academic','Professional'], datasets:[{ label:'Median NoF', data:[5.8, 3.6], borderWidth:1, borderRadius:8 }] }} options={{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } } }} />
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+            <h3 className="text-xl font-semibold">Operational Unit Analysis</h3>
+            <ChartBox type="bar" className="h-[320px]" data={{ labels: unitAnalysis.map(u=>u.unit), datasets:[{ data: unitAnalysis.map(u=>u.value), borderWidth:1, borderRadius:8 }] }} options={{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ ticks:{ callback:(v)=>v.toLocaleString() } } } }} />
+          </div>
+
+          <div className="mt-6 rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
+            <h3 className="text-lg font-semibold">Unit Table</h3>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="text-left text-slate-500"><tr><th>UoS Level Unit</th><th>Value per FTE 2023</th><th>Value per FTE 2024</th><th>Comparison</th></tr></thead>
+                <tbody>
+                  {unitTable.map((r,i)=> (
+                    <tr key={i} className="border-t">
+                      <td className="py-2">{r.unit}</td>
+                      <td className="py-2">{numberFmt(r.v2023)}</td>
+                      <td className="py-2">{numberFmt(r.v2024)}</td>
+                      <td className={`py-2 ${r.change<0? 'text-emerald-600':'text-rose-600'}`}>{Math.abs(r.change).toFixed(1)}% {r.change<0? '▼':'▲'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="mx-auto max-w-7xl text-right text-xs text-slate-500 mt-4">Indicative demo, not audited for emissions purposes.</div>
+        </div>
+      );
+    }
+
+    // ---------------------- App ----------------------
+    function App(){
+      const [tab, setTab] = useState('summary');
+      const asOf = dayjs().format('DD/MM/YYYY');
+      return (
+        <div className="min-h-screen">
+          <Header asOf={asOf} />
+          <Tabs tab={tab} setTab={setTab} />
+          {tab==='summary' && <TabSummary />}
+          {tab==='inventory' && <TabInventory />}
+          {tab==='staff' && <TabStaff />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
