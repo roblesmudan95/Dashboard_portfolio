@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Biodiversity on campus — Demo</title>
+  <!-- Tailwind CSS (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { brand: '#0C0C48' } } } };
+  </script>
+  <!-- Leaflet map -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Chart.js for sparklines -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <!-- React -->
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Day.js + Babel -->
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useMemo, useState, useEffect, useRef } = React;
+    const numberFmt = (x) => (x ?? 0).toLocaleString();
+
+    const card = "rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200";
+
+    // ---------------- Header ----------------
+    function Header(){
+      return (
+        <div className="w-full bg-brand text-white">
+          <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <img src="https://www.auckland.ac.nz/content/auckland/en/news/2025/04/15/refreshed-university-logo-unifies-brand/_jcr_content/leftpar/imagecomponent/image.img.480.low.jpg/1744667894355.jpg" alt="UoA logo" className="h-9 w-auto shrink-0"/>
+              <h1 className="text-xl font-semibold">Biodiversity on campus</h1>
+            </div>
+            <div className="text-sm opacity-80">Data Glossary ℹ️</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ---------------- Base dummy data ----------------
+    const YEARS = [2020,2021,2022,2023,2024,2025];
+    const SITE_INFO = {
+      'City Campus': { lat:-36.8523, lng:174.7691, area:4.82 },
+      'Grafton Campus': { lat:-36.8648, lng:174.7698, area:46.71 },
+      'Newmarket Campus': { lat:-36.8732, lng:174.7777, area:53.56 },
+      'Huapai Reserve': { lat:-36.7700, lng:174.5240, area:167.45 },
+      'Leigh Reserve': { lat:-36.2686, lng:174.8107, area:620.33 }
+    };
+
+    const SPECIES = [
+      { name:'Kākā', cat:'Aves', native:true, threatened:true },
+      { name:'Fantail', cat:'Aves', native:true, threatened:false },
+      { name:'Silvereye', cat:'Aves', native:true, threatened:false },
+      { name:'House Sparrow', cat:'Aves', native:false, threatened:false, pest:false },
+      { name:'Brushtail Possum', cat:'Animalia', native:false, threatened:false, pest:true },
+      { name:'Tree Wētā', cat:'Animalia', native:true, threatened:false },
+      { name:'Green Gecko', cat:'Amphibia', native:true, threatened:true },
+      { name:'Kauri', cat:'Pinopsida', native:true, threatened:true },
+      { name:'Pōhutukawa', cat:'Magnoliopsida', native:true, threatened:false },
+      { name:'Privet', cat:'Magnoliopsida', native:false, threatened:false, pest:true },
+      { name:'Moss sp.', cat:'Bryophyta', native:true, threatened:false },
+      { name:'Orb-weaver', cat:'Arachnida', native:true, threatened:false }
+    ];
+
+    // Build observation records deterministically (no randomness)
+    const SITES = Object.keys(SITE_INFO);
+    const OBS = [];
+    SPECIES.forEach((sp, si) => {
+      SITES.forEach((site, ti) => {
+        YEARS.forEach((year) => {
+          const base = ((si+1)*(ti+2) + (year-2020)) % 7; // 0..6
+          const count = base * 4 + (si % 3 === 0 ? 6 : 0); // some zeros, some boosts
+          if (count > 0 && (si + ti + year) % 2 === 0) {
+            OBS.push({ site, species: sp.name, year, count });
+          }
+        });
+      });
+    });
+
+    const speciesByName = Object.fromEntries(SPECIES.map(s => [s.name, s]));
+
+    // ---------------- Filters ----------------
+    function Filters({ years, setYears, native, setNative, threatened, setThreatened, site, setSite }){
+      const allYears = YEARS.map(String);
+      const sites = ['(All)', ...SITES];
+      return (
+        <div className="bg-white/70 ring-1 ring-slate-200">
+          <div className="mx-auto max-w-7xl px-4 py-3 grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <label className="flex items-center gap-2"><span className="w-16 text-sm text-slate-600">Year:</span>
+              <select multiple value={years} onChange={(e)=>setYears(Array.from(e.target.selectedOptions).map(o=>o.value))} className="min-w-[14rem] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm">
+                {allYears.map(y=> <option key={y} value={y}>{y}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-2"><span className="w-16 text-sm text-slate-600">Native:</span>
+              <select value={native} onChange={(e)=>setNative(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm">
+                <option>(All)</option>
+                <option>Native only</option>
+                <option>Introduced</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2"><span className="w-24 text-sm text-slate-600">Threatened:</span>
+              <select value={threatened} onChange={(e)=>setThreatened(e.target.value)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm">
+                <option>(All)</option>
+                <option>Threatened only</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 md:col-span-2 lg:col-span-3"><span className="w-16 text-sm text-slate-600">UoA Site:</span>
+              <select value={site} onChange={(e)=>setSite(e.target.value)} className="min-w-[14rem] rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm">
+                {sites.map(s=> <option key={s}>{s}</option>)}
+              </select>
+            </label>
+          </div>
+        </div>
+      );
+    }
+
+    // ---------------- KPI + Sparkline ----------------
+    function Sparkline({ values=[5,6,7,5,6,4,5] }){
+      const ref = useRef(null);
+      useEffect(()=>{
+        const ctx = ref.current.getContext('2d');
+        const chart = new Chart(ctx, {
+          type:'line',
+          data: { labels: values.map((_,i)=>i), datasets: [{ data: values, fill:true, tension:0.4, pointRadius:0, borderWidth:1 }] },
+          options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ x:{ display:false }, y:{ display:false } } }
+        });
+        return ()=>chart.destroy();
+      }, [JSON.stringify(values)]);
+      return <div className="h-8"><canvas ref={ref}/></div>;
+    }
+
+    function KPI({ title, value, prev }){
+      const delta = prev? ((value - prev)/prev)*100 : 0;
+      const pill = delta>=0? 'bg-emerald-100 text-emerald-700':'bg-rose-100 text-rose-700';
+      return (
+        <div className={card}>
+          <div className="text-slate-600 text-sm">{title}</div>
+          <div className="mt-1 text-3xl font-semibold">{numberFmt(value)}</div>
+          <div className="mt-1 text-xs text-slate-500">Previous Year: {numberFmt(prev||0)}</div>
+          <div className={`mt-2 inline-flex items-center rounded-full px-3 py-1 text-xs ${pill}`}>{delta>=0?'+':''}{delta.toFixed(1)}%</div>
+          <Sparkline />
+        </div>
+      );
+    }
+
+    // ---------------- Map ----------------
+    function LeafletMap({ markers }){
+      const id = 'biodiv-map';
+      const mapRef = useRef(null);
+      useEffect(()=>{
+        if (!mapRef.current) {
+          const map = L.map(id).setView([-36.84, 174.74], 9);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:18}).addTo(map);
+          mapRef.current = map;
+        }
+        const map = mapRef.current;
+        if (map._layerGroup) map.removeLayer(map._layerGroup);
+        const group = L.layerGroup();
+        markers.forEach(m=>{
+          const marker = L.marker([m.lat,m.lng]);
+          marker.bindPopup(`<strong>${m.name}</strong><br/>Observations: ${m.obs}<br/>Species: ${m.species}`);
+          group.addLayer(marker);
+        });
+        group.addTo(map); map._layerGroup = group;
+      }, [JSON.stringify(markers)]);
+      return <div id={id} className="w-full h-[380px] rounded-xl overflow-hidden ring-1 ring-slate-200"></div>;
+    }
+
+    // ---------------- Page ----------------
+    function Page(){
+      const [years, setYears] = useState(YEARS.map(String));
+      const [native, setNative] = useState('(All)');
+      const [threatened, setThreatened] = useState('(All)');
+      const [site, setSite] = useState('(All)');
+
+      const selectedYears = useMemo(()=> years.map(y=>parseInt(y,10)), [years]);
+      const prevYear = useMemo(()=> Math.max(...selectedYears) - 1, [selectedYears]);
+
+      // Filter records according to controls
+      const filtered = useMemo(()=> {
+        return OBS.filter(r => selectedYears.includes(r.year))
+          .filter(r => site === '(All)' ? true : r.site === site)
+          .filter(r => {
+            const s = speciesByName[r.species];
+            if (native === 'Native only' && !s.native) return false;
+            if (native === 'Introduced' && s.native) return false;
+            if (threatened === 'Threatened only' && !s.threatened) return false;
+            return true;
+          });
+      }, [selectedYears, native, threatened, site]);
+
+      const prevFiltered = useMemo(()=> {
+        return OBS.filter(r => r.year === prevYear)
+          .filter(r => site === '(All)' ? true : r.site === site)
+          .filter(r => {
+            const s = speciesByName[r.species];
+            if (native === 'Native only' && !s.native) return false;
+            if (native === 'Introduced' && s.native) return false;
+            if (threatened === 'Threatened only' && !s.threatened) return false;
+            return true;
+          });
+      }, [prevYear, native, threatened, site]);
+
+      const selectedSites = useMemo(()=> site==='(All)' ? SITES : [site], [site]);
+      const totalArea = useMemo(()=> selectedSites.reduce((a,s)=> a + (SITE_INFO[s]?.area||0), 0), [selectedSites]);
+
+      // General KPIs
+      const speciesSet = useMemo(()=> new Set(filtered.map(r=>r.species)), [filtered]);
+      const speciesPrevSet = useMemo(()=> new Set(prevFiltered.map(r=>r.species)), [prevFiltered]);
+      const obsTotal = useMemo(()=> filtered.reduce((a,b)=>a+b.count,0), [filtered]);
+      const obsPrevTotal = useMemo(()=> prevFiltered.reduce((a,b)=>a+b.count,0), [prevFiltered]);
+
+      const general = {
+        species: { current: speciesSet.size, prev: speciesPrevSet.size },
+        speciesKm2: { current: totalArea? speciesSet.size/totalArea : 0, prev: totalArea? speciesPrevSet.size/totalArea : 0 },
+        observations: { current: obsTotal, prev: obsPrevTotal },
+        obsKm2: { current: totalArea? obsTotal/totalArea : 0, prev: totalArea? obsPrevTotal/totalArea : 0 }
+      };
+
+      // Pests/weeds KPIs (use SPECIES.pest flag)
+      const pestFilter = (r) => speciesByName[r.species]?.pest;
+      const pestSpeciesSet = new Set(filtered.filter(pestFilter).map(r=>r.species));
+      const pestSpeciesPrevSet = new Set(prevFiltered.filter(pestFilter).map(r=>r.species));
+      const pestObsTotal = filtered.filter(pestFilter).reduce((a,b)=>a+b.count,0);
+      const pestObsPrevTotal = prevFiltered.filter(pestFilter).reduce((a,b)=>a+b.count,0);
+
+      const pests = {
+        species: { current: pestSpeciesSet.size, prev: pestSpeciesPrevSet.size },
+        speciesKm2: { current: totalArea? pestSpeciesSet.size/totalArea : 0, prev: totalArea? pestSpeciesPrevSet.size/totalArea : 0 },
+        observations: { current: pestObsTotal, prev: pestObsPrevTotal },
+        obsKm2: { current: totalArea? pestObsTotal/totalArea : 0, prev: totalArea? pestObsPrevTotal/totalArea : 0 }
+      };
+
+      // Campus/Site aggregation
+      const campusRows = useMemo(()=>{
+        const map = new Map();
+        filtered.forEach(r => {
+          const key = r.site;
+          if (!map.has(key)) map.set(key, { site:key, observations:0, species:new Set() });
+          const row = map.get(key);
+          row.observations += r.count; row.species.add(r.species);
+        });
+        return Array.from(map.values()).map(row => {
+          const area = SITE_INFO[row.site]?.area || 1;
+          return { site: row.site, observations: row.observations, species: row.species.size, area };
+        }).sort((a,b)=> b.observations - a.observations);
+      }, [filtered]);
+
+      // Category aggregation
+      const categoryRows = useMemo(()=>{
+        const map = new Map();
+        filtered.forEach(r => {
+          const cat = speciesByName[r.species]?.cat || 'Other';
+          if (!map.has(cat)) map.set(cat, { cat, obs:0, species:new Set() });
+          const row = map.get(cat); row.obs += r.count; row.species.add(r.species);
+        });
+        return Array.from(map.values()).map(row => ({ cat: row.cat, obs: row.obs, spp: row.species.size }))
+          .sort((a,b)=> b.obs - a.obs);
+      }, [filtered]);
+
+      // Map markers per site
+      const markers = useMemo(()=>{
+        return selectedSites.map(name => {
+          const info = SITE_INFO[name];
+          const rows = filtered.filter(r=> r.site === name);
+          const obs = rows.reduce((a,b)=>a+b.count,0);
+          const species = new Set(rows.map(r=>r.species)).size;
+          return { name, lat:info.lat, lng:info.lng, obs, species };
+        });
+      }, [filtered, selectedSites]);
+
+      return (
+        <div className="min-h-screen">
+          <Header />
+          <Filters years={years} setYears={setYears} native={native} setNative={setNative}
+                   threatened={threatened} setThreatened={setThreatened} site={site} setSite={setSite} />
+
+          {/* KPI groups */}
+          <div className="mx-auto max-w-7xl px-4 mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div>
+              <h2 className="text-xl font-semibold text-brand">General</h2>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <KPI title="Species" value={general.species.current} prev={general.species.prev} />
+                <KPI title="Species/km²" value={general.speciesKm2.current} prev={general.speciesKm2.prev} />
+                <KPI title="Observations" value={general.observations.current} prev={general.observations.prev} />
+                <KPI title="Observations/km²" value={general.obsKm2.current} prev={general.obsKm2.prev} />
+              </div>
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-brand">Pests/weeds</h2>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <KPI title="Species" value={pests.species.current} prev={pests.species.prev} />
+                <KPI title="Species/km²" value={pests.speciesKm2.current} prev={pests.speciesKm2.prev} />
+                <KPI title="Observations" value={pests.observations.current} prev={pests.observations.prev} />
+                <KPI title="Observations/km²" value={pests.obsKm2.current} prev={pests.obsKm2.prev} />
+              </div>
+            </div>
+          </div>
+
+          {/* Map + Campus table */}
+          <div className="mx-auto max-w-7xl px-4 mt-8 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            <div className="lg:col-span-7">
+              <h3 className="text-xl font-semibold">Observations location</h3>
+              <div className="mt-3">
+                <LeafletMap markers={markers} />
+              </div>
+              <div className="text-xs text-slate-500 mt-2">© OpenStreetMap contributors • Powered by Leaflet</div>
+            </div>
+            <div className="lg:col-span-5">
+              <div className={card}>
+                <h3 className="text-xl font-semibold">Campus/Site</h3>
+                <div className="mt-3 max-h-[380px] overflow-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="text-left text-slate-500">
+                      <tr>
+                        <th className="py-2">UoA Site</th>
+                        <th className="py-2">Observations</th>
+                        <th className="py-2">Species</th>
+                        <th className="py-2">Area Km²</th>
+                        <th className="py-2">Species/km²</th>
+                        <th className="py-2">Observations/km²</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {campusRows.map((r,i)=>{
+                        const sppKm2 = (r.species/(r.area||1));
+                        const obsKm2 = (r.observations/(r.area||1));
+                        return (
+                          <tr key={i} className="border-t">
+                            <td className="py-2">{r.site}</td>
+                            <td className="py-2">{numberFmt(r.observations)}</td>
+                            <td className="py-2">{numberFmt(r.species)}</td>
+                            <td className="py-2">{numberFmt(r.area)}</td>
+                            <td className="py-2">{sppKm2.toFixed(2)}</td>
+                            <td className="py-2">{obsKm2.toFixed(2)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Category table */}
+          <div className="mx-auto max-w-7xl px-4 mt-8">
+            <div className={card}>
+              <h3 className="text-xl font-semibold">Category</h3>
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-slate-500">
+                    <tr>
+                      <th className="py-2">Category</th>
+                      <th className="py-2">Observations</th>
+                      <th className="py-2">Species</th>
+                      <th className="py-2">Species/km²</th>
+                      <th className="py-2">Observations/km²</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {categoryRows.map((r,i)=>{
+                      const sppKm2 = totalArea ? r.spp / totalArea : 0;
+                      const obsKm2 = totalArea ? r.obs / totalArea : 0;
+                      return (
+                        <tr key={i} className="border-t">
+                          <td className="py-2">{r.cat}</td>
+                          <td className="py-2">{numberFmt(r.obs)}</td>
+                          <td className="py-2">{numberFmt(r.spp)}</td>
+                          <td className="py-2">{sppKm2.toFixed(2)}</td>
+                          <td className="py-2">{obsKm2.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div className="mx-auto max-w-7xl px-4 py-8 text-right text-xs text-slate-500">Demo data and logic only, for portfolio display.</div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Page />);
+  </script>
+</body>
+</html>
